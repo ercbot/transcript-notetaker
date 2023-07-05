@@ -19,7 +19,7 @@ config['REQUIRED'] = {
 # Optional
 config['OPTIONAL'] = {
     'transcript-filepath': 'transcript.txt',
-    'notes-filepath': 'notes.txt'
+    'notes-filepath': 'notes.md'
 }
 
 with open('config.ini', 'w') as configfile:
