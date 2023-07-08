@@ -5,6 +5,7 @@ import time
 import re
 # 3rd party
 from langchain.llms import OpenAI
+from langchain.chat_models import ChatOpenAI
 from langchain import LLMChain
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain import PromptTemplate
@@ -13,13 +14,31 @@ from langchain import PromptTemplate
 config = configparser.ConfigParser()
 config.read('config.ini')
 
+# read config variables
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = config['REQUIRED']['openai-api-key']
 
-def load_transcript(path: str):
+# LangChain Config
+# llm
+llm = OpenAI(temperature=0)
+# prompt
+prompt = PromptTemplate(
+    template="Write a concise summary of the following: {transcript}",
+    input_variables=['transcript']
+)
+# chain
+chain = LLMChain(
+    prompt=prompt,
+    llm=llm,
+    verbose=False
+)
+
+
+def load_transcript(input_file):
     # Google Meet Transcripts have a header which we don't want to be summarized
     header_lines = 5
 
-    with open(path, 'r') as input_file:
-        file_text = input_file.readlines()
+    file_text = input_file.readlines()
 
     head = file_text[:header_lines]
     transcript = "".join(file_text[header_lines:])
@@ -27,35 +46,21 @@ def load_transcript(path: str):
     return head, transcript
 
 
-if __name__ == '__main__':
+def create_meeting_notes(transcript_file):
     # read config variables
-    if not os.getenv("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = config['REQUIRED']['openai-api-key']
-    transcript_filepath = config['OPTIONAL']['transcript-filepath']
-    notes_filepath = config['OPTIONAL']['notes-filepath']
+    # if not os.getenv("OPENAI_API_KEY"):
+    #     os.environ["OPENAI_API_KEY"] = config['REQUIRED']['openai-api-key']
+    # transcript_filepath = config['OPTIONAL']['transcript-filepath']
+    # notes_filepath = config['OPTIONAL']['notes-filepath']
 
-    llm = OpenAI(temperature=0)
-
-    head, transcript = load_transcript(transcript_filepath)
+    head, transcript = load_transcript(transcript_file)
 
     # split the transcript on the 5-min timestamps
-    regex_pattern = r"[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    regex_pattern = r"[0-9]{2}:[0-9]{2}:0{2}"
     five_min_chunks = re.split(regex_pattern, transcript)
 
     # create a textsplitter to subdivide those chunks into appropriately sized chunks.
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-
-    # prompt
-    prompt = PromptTemplate(
-        template="Write a concise summary of the following: {transcript}",
-        input_variables=['transcript']
-    )
-
-    chain = LLMChain(
-        prompt=prompt,
-        llm=llm,
-        verbose=False
-    )
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=0)
 
     # list the meeting time and the chunks associated with it
     timestamped_summaries = []
@@ -68,7 +73,7 @@ if __name__ == '__main__':
         sub_chunks = text_splitter.split_text(five_minutes_chunk)
 
         summaries = []
-        for j, chunk in enumerate(sub_chunks):
+        for j, chunk in enumerate(sub_chunks, 1):
             summaries.append(chain.run(chunk))
             print(f"{timestamp}: Chunk {j}/{len(sub_chunks)}")
 
@@ -80,16 +85,21 @@ if __name__ == '__main__':
 
     first_line = re.split(r"[()]", head[0])
 
-    # Write summaries to file
-    with open(notes_filepath, 'w+') as f:
-        f.write(f"# {first_line[0]}\n")
-        f.write(f"{first_line[1]}\n")
-        f.write("## Attendees\n")
-        f.write(f"{head[2]}\n")
-        f.write('## Meeting Notes\n')
-        for timestamp, summaries in timestamped_summaries:
-            f.write(f"### {timestamp}\n")
-            for summary in summaries:
-                f.write(f"- {summary.strip()}\n")
+    # Transcript Notes
+    meeting_notes = f'''# {first_line[0]}
+{first_line[1]}
+## Attendees
+{head[2]}## Meeting Notes
+'''
+    for timestamp, summaries in timestamped_summaries:
+        meeting_notes += f'### {timestamp}\n'
+        for summary in summaries:
+            meeting_notes += f"- {summary.strip()}\n"
+    meeting_notes += "\nEnd of Meeting"
 
-    print(f"Export to file {notes_filepath} completed")
+    return meeting_notes
+
+    # with open(notes_filepath, 'w+') as f:
+    #     f.write(meeting_notes)
+
+    # print(f"Export to file {notes_filepath} completed")
